@@ -666,7 +666,7 @@ def compute_pro(masks: ndarray, amaps: ndarray, num_th: int = 200) -> None:
     assert isinstance(num_th, int), "type(num_th) must be int"
 
     df = pd.DataFrame([], columns=["pro", "fpr", "threshold"])
-    binary_amaps = np.zeros_like(amaps, dtype=np.bool)
+    binary_amaps = np.zeros_like(amaps, dtype=np.bool_)
 
     min_th = amaps.min()
     max_th = amaps.max()
@@ -688,7 +688,7 @@ def compute_pro(masks: ndarray, amaps: ndarray, num_th: int = 200) -> None:
         fp_pixels = np.logical_and(inverse_masks, binary_amaps).sum()
         fpr = fp_pixels / inverse_masks.sum()
 
-        df = df._append({"pro": mean(pros), "fpr": fpr, "threshold": th}, ignore_index=True)
+        df = pd.concat([df, pd.DataFrame([{"pro": mean(pros), "fpr": fpr, "threshold": th}])], ignore_index=True)
 
     # Normalize FPR from 0 ~ 1 to 0 ~ 0.3
     df = df[df["fpr"] < 0.3]

@@ -1,7 +1,5 @@
-# This is a sample Python script.
-
-# Press ⌃R to execute it or replace it with your code.
-# Press Double ⇧ to search everywhere for classes, files, tool windows, actions, and settings.
+# MoE Bottleneck 版本 - 基于官方 dinomaly_mvtec_uni_base.py
+# 唯一区别：bottleneck 从单个 bMlp 替换为 MoEBottleneck
 
 import torch
 import torch.nn as nn
@@ -12,7 +10,7 @@ import random
 import os
 from torch.utils.data import DataLoader, ConcatDataset
 
-from models.uad import ViTill, ViTillv2
+from models.uad import ViTill, ViTillv2, MoEBottleneck
 from models import vit_encoder
 from dinov1.utils import trunc_normal_
 from models.vision_transformer import Block as VitBlock, bMlp, Attention, LinearAttention, \
@@ -71,7 +69,7 @@ def train(item_list):
     setup_seed(1)
 
     total_iters = 10000
-    batch_size = 12 # Cuda OOM when setting 16 with 32GB of GPU memory.
+    batch_size = 16
     image_size = 512
     crop_size = 448
 
@@ -79,6 +77,7 @@ def train(item_list):
 
     train_data_list = []
     test_data_list = []
+
     for i, item in enumerate(item_list):
         train_path = os.path.join(args.data_path, item, 'train')
         test_path = os.path.join(args.data_path, item)
@@ -96,14 +95,15 @@ def train(item_list):
     train_dataloader = torch.utils.data.DataLoader(train_data, batch_size=batch_size, shuffle=True, num_workers=4,
                                                    drop_last=True)
 
-    target_layers = [4, 6, 8, 10, 12, 14, 16, 18]
+
+    target_layers = [2, 3, 4, 5, 6, 7, 8, 9]
     fuse_layer_encoder = [[0, 1, 2, 3], [4, 5, 6, 7]]
     fuse_layer_decoder = [[0, 1, 2, 3], [4, 5, 6, 7]]
 
-    encoder_name = 'dinov3_vitl16'
-    encoder_weight = 'weights/dinov3_vitl16_pretrain_lvd1689m-8aa4cbdd.pth'
+    encoder_name = 'dinov3_vitb16'
+    encoder_weight = 'weights/dinov3_vitb16_pretrain_lvd1689m-73cec8be.pth'
 
-    encoder = load_dinov3_model(encoder_name, layers_to_extract_from=target_layers,  pretrained_weight_path=encoder_weight)
+    encoder = load_dinov3_model(encoder_name, layers_to_extract_from=target_layers, pretrained_weight_path=encoder_weight)
 
     if 'vits' in encoder_name:
         embed_dim, num_heads = 384, 6
@@ -114,12 +114,18 @@ def train(item_list):
     else:
         raise "Architecture not in vits, vitb, vitl."
 
-    bottleneck = []
+    # ===== MoE Bottleneck 替换原始单 bMlp =====
+    bottleneck = MoEBottleneck(
+        dim=embed_dim,
+        hidden_dim=embed_dim * 4,
+        num_experts=3,
+        top_k=2,
+        prompt_k=16,
+        dropout=0.2,
+        lb_weight=0.01,
+    )
+
     decoder = []
-
-    bottleneck.append(bMlp(embed_dim, embed_dim * 4, embed_dim, drop=0.2))
-    bottleneck = nn.ModuleList(bottleneck)
-
     for i in range(8):
         blk = VitBlock(dim=embed_dim, num_heads=num_heads, mlp_ratio=4.,
                        qkv_bias=True, norm_layer=partial(nn.LayerNorm, eps=1e-8),
@@ -142,6 +148,20 @@ def train(item_list):
             nn.init.constant_(m.bias, 0)
             nn.init.constant_(m.weight, 1.0)
 
+    # Router 初始化: weight=0, bias=-5
+    nn.init.constant_(bottleneck.router[2].weight, 0)
+    nn.init.constant_(bottleneck.router[2].bias, -5)
+
+    print_fn('=' * 60)
+    print_fn('MoE Config:')
+    print_fn(f'  num_experts={bottleneck.num_experts}, top_k={bottleneck.top_k}, '
+             f'prompt_k={bottleneck.prompt_k}')
+    print_fn(f'  hidden_dim={bottleneck.hidden_dim}, dropout={bottleneck.experts[0].drop.p}, '
+             f'lb_weight={bottleneck.lb_weight}')
+    print_fn(f'  router_init: weight=0, bias=-5')
+    print_fn(f'  total_iters={total_iters}, amsgrad=False')
+    print_fn('=' * 60)
+
     optimizer = StableAdamW([{'params': trainable.parameters()}],
                             lr=2e-3, betas=(0.9, 0.999), weight_decay=1e-4, amsgrad=False, eps=1e-10)
     lr_scheduler = WarmCosineScheduler(optimizer, base_value=2e-3, final_value=2e-4, total_iters=total_iters,
@@ -158,17 +178,20 @@ def train(item_list):
         for img, label in train_dataloader:
             img = img.to(device)
             label = label.to(device)
-            en, de = model(img)
+            en, de, router_info = model(img)
+
             p_final = 0.9
             p = min(p_final * it / 1000, p_final)
-            loss = global_cosine_hm_percent(en, de, p=p, factor=0.1)
+            recon_loss = global_cosine_hm_percent(en, de, p=p, factor=0.1)
+            lb_loss = router_info['lb_loss']
+            loss = recon_loss + lb_loss
 
             optimizer.zero_grad()
             loss.backward()
             nn.utils.clip_grad_norm(trainable.parameters(), max_norm=0.1)
 
             optimizer.step()
-            loss_list.append(loss.item())
+            loss_list.append(recon_loss.item())
             lr_scheduler.step()
 
             if (it + 1) % 5000 == 0:
@@ -206,7 +229,12 @@ def train(item_list):
             if it == total_iters:
                 break
 
-        print_fn('iter [{}/{}], loss:{:.4f}'.format(it, total_iters, np.mean(loss_list)))
+        expert_usage = router_info['expert_usage'].cpu().numpy()
+        usage_str = ', '.join([f'E{i}:{u:.2f}' for i, u in enumerate(expert_usage)])
+        print_fn('iter [{}/{}], loss:{:.4f}, lb:{:.4f}, usage:[{}]'.format(
+            it, total_iters, np.mean(loss_list), lb_loss.item(), usage_str))
+
+    torch.save(model.state_dict(), os.path.join(args.save_dir, args.save_name, 'model.pth'))
 
     return
 
@@ -215,9 +243,9 @@ if __name__ == '__main__':
     import argparse
 
     parser = argparse.ArgumentParser(description='')
-    parser.add_argument('--data_path', type=str, default='./dataset/mvtec_anomaly_detection')
+    parser.add_argument('--data_path', type=str, default='../mvtec_anomaly_detection')
     parser.add_argument('--save_dir', type=str, default='./saved_results')
-    parser.add_argument('--save_name', type=str, default='vitill_mvtec_uni_dinov3_large')
+    parser.add_argument('--save_name', type=str, default='mvtec_uni_dinov3_moe2')
     args = parser.parse_args()
 
     item_list = ['carpet', 'grid', 'leather', 'tile', 'wood', 'bottle', 'cable', 'capsule',
@@ -226,6 +254,6 @@ if __name__ == '__main__':
     logger = get_logger(args.save_name, os.path.join(args.save_dir, args.save_name))
     print_fn = logger.info
 
-    device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
+    device = 'cuda:1' if torch.cuda.is_available() else 'cpu'
     print_fn(device)
     train(item_list)

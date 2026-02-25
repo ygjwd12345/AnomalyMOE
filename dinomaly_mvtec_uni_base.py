@@ -105,7 +105,7 @@ def train(item_list):
     encoder_name = 'dinov3_vitb16'
     encoder_weight = 'weights/dinov3_vitb16_pretrain_lvd1689m-73cec8be.pth'
 
-    encoder = load_dinov3_model(encoder_name, layers_to_extract_from=target_layers,  pretrained_weight_path=encoder_weight)
+    encoder = load_dinov3_model(encoder_name, layers_to_extract_from=target_layers, pretrained_weight_path=encoder_weight)
 
     if 'vits' in encoder_name:
         embed_dim, num_heads = 384, 6
@@ -211,6 +211,8 @@ def train(item_list):
 
         print_fn('iter [{}/{}], loss:{:.4f}'.format(it, total_iters, np.mean(loss_list)))
 
+    torch.save(model.state_dict(), os.path.join(args.save_dir, args.save_name, 'model.pth'))
+
     return
 
 
@@ -218,7 +220,7 @@ if __name__ == '__main__':
     import argparse
 
     parser = argparse.ArgumentParser(description='')
-    parser.add_argument('--data_path', type=str, default='./mvtec_anomaly_detection')
+    parser.add_argument('--data_path', type=str, default='../mvtec_anomaly_detection')
     parser.add_argument('--save_dir', type=str, default='./saved_results')
     parser.add_argument('--save_name', type=str, default='vitill_mvtec_uni_dinov3_base')
     args = parser.parse_args()

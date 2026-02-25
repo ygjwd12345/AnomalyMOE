@@ -13,15 +13,14 @@ import os
 from torch.utils.data import DataLoader, ConcatDataset
 
 from models.uad import ViTill, ViTillv2
-from models import vit_encoder
 from dinov1.utils import trunc_normal_
 from models.vision_transformer import Block as VitBlock, bMlp, Attention, LinearAttention, \
-    LinearAttention2, ConvBlock, FeatureJitter
+    LinearAttention2
 from dataset import MVTecDataset
 import torch.backends.cudnn as cudnn
 import argparse
-from utils import evaluation_batch, global_cosine, regional_cosine_hm_percent, global_cosine_hm_percent, \
-    WarmCosineScheduler
+from utils import evaluation_batch, global_cosine_hm_percent, global_cosine, \
+    regional_cosine_hm, WarmCosineScheduler
 from torch.nn import functional as F
 from functools import partial
 from optimizers import StableAdamW
@@ -71,7 +70,7 @@ def train(item_list):
     setup_seed(1)
 
     total_iters = 10000
-    batch_size = 12 # Cuda OOM when setting 16 with 32GB of GPU memory.
+    batch_size = 16
     image_size = 512
     crop_size = 448
 
@@ -96,14 +95,14 @@ def train(item_list):
     train_dataloader = torch.utils.data.DataLoader(train_data, batch_size=batch_size, shuffle=True, num_workers=4,
                                                    drop_last=True)
 
-    target_layers = [4, 6, 8, 10, 12, 14, 16, 18]
+    target_layers = [2, 3, 4, 5, 6, 7, 8, 9]
     fuse_layer_encoder = [[0, 1, 2, 3], [4, 5, 6, 7]]
     fuse_layer_decoder = [[0, 1, 2, 3], [4, 5, 6, 7]]
 
-    encoder_name = 'dinov3_vitl16'
-    encoder_weight = 'weights/dinov3_vitl16_pretrain_lvd1689m-8aa4cbdd.pth'
+    encoder_name = 'dinov3_vitb16'
+    encoder_weight = 'weights/dinov3_vitb16_pretrain_lvd1689m-73cec8be.pth'
 
-    encoder = load_dinov3_model(encoder_name, layers_to_extract_from=target_layers,  pretrained_weight_path=encoder_weight)
+    encoder = load_dinov3_model(encoder_name, layers_to_extract_from=target_layers, pretrained_weight_path=encoder_weight)
 
     if 'vits' in encoder_name:
         embed_dim, num_heads = 384, 6
@@ -143,7 +142,7 @@ def train(item_list):
             nn.init.constant_(m.weight, 1.0)
 
     optimizer = StableAdamW([{'params': trainable.parameters()}],
-                            lr=2e-3, betas=(0.9, 0.999), weight_decay=1e-4, amsgrad=False, eps=1e-10)
+                            lr=2e-3, betas=(0.9, 0.999), weight_decay=1e-4, amsgrad=True, eps=1e-10)
     lr_scheduler = WarmCosineScheduler(optimizer, base_value=2e-3, final_value=2e-4, total_iters=total_iters,
                                        warmup_iters=100)
 
@@ -159,6 +158,7 @@ def train(item_list):
             img = img.to(device)
             label = label.to(device)
             en, de = model(img)
+
             p_final = 0.9
             p = min(p_final * it / 1000, p_final)
             loss = global_cosine_hm_percent(en, de, p=p, factor=0.1)
@@ -206,26 +206,30 @@ def train(item_list):
             if it == total_iters:
                 break
 
-        print_fn('iter [{}/{}], loss:{:.4f}'.format(it, total_iters, np.mean(loss_list)))
+            print_fn('iter [{}/{}], loss:{:.4f}'.format(it, total_iters, np.mean(loss_list)))
+
+        torch.save(model.state_dict(), os.path.join(args.save_dir, args.save_name, 'model.pth'))
 
     return
 
 
 if __name__ == '__main__':
+    os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
     import argparse
 
     parser = argparse.ArgumentParser(description='')
-    parser.add_argument('--data_path', type=str, default='./dataset/mvtec_anomaly_detection')
+    parser.add_argument('--data_path', type=str, default='../VisA_pytorch/1cls')
     parser.add_argument('--save_dir', type=str, default='./saved_results')
-    parser.add_argument('--save_name', type=str, default='vitill_mvtec_uni_dinov3_large')
+    parser.add_argument('--save_name', type=str,
+                        default='visa_uni_dinov3_base')
     args = parser.parse_args()
 
-    item_list = ['carpet', 'grid', 'leather', 'tile', 'wood', 'bottle', 'cable', 'capsule',
-                 'hazelnut', 'metal_nut', 'pill', 'screw', 'toothbrush', 'transistor', 'zipper']
-
+    item_list = ['candle', 'capsules', 'cashew', 'chewinggum', 'fryum', 'macaroni1', 'macaroni2',
+                 'pcb1', 'pcb2', 'pcb3', 'pcb4', 'pipe_fryum']
     logger = get_logger(args.save_name, os.path.join(args.save_dir, args.save_name))
     print_fn = logger.info
 
-    device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
+    device = 'cuda:1' if torch.cuda.is_available() else 'cpu'
     print_fn(device)
+
     train(item_list)

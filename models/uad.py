@@ -6,6 +6,76 @@ from torch.nn.modules.batchnorm import _BatchNorm
 from sklearn.cluster import KMeans
 import math
 
+from models.vision_transformer import bMlp
+
+
+class MoEBottleneck(nn.Module):
+    """
+    Mixture-of-Experts Bottleneck: 多个 bMlp 作为 experts，
+    通过 MLP router 动态选择 top_k 个 expert 并加权组合输出。
+    """
+    def __init__(self, dim, hidden_dim=None, num_experts=4, top_k=2,
+                 prompt_k=16, dropout=0.2, lb_weight=0.01):
+        super().__init__()
+        self.dim = dim
+        self.hidden_dim = hidden_dim or dim * 4
+        self.num_experts = num_experts
+        self.top_k = top_k
+        self.prompt_k = prompt_k
+        self.lb_weight = lb_weight
+
+        self.router = nn.Sequential(
+            nn.Linear(dim, dim // 4),
+            nn.GELU(),
+            nn.Linear(dim // 4, num_experts),
+        )
+
+        self.experts = nn.ModuleList([
+            bMlp(dim, self.hidden_dim, dim, drop=dropout)
+            for _ in range(num_experts)
+        ])
+
+    def forward(self, x):
+        B, N, C = x.shape
+
+        # Prompt selection -> context
+        x_mean = x.mean(dim=1, keepdim=True)
+        sim = F.cosine_similarity(x, x_mean, dim=-1)
+        _, topk_idx = torch.topk(sim, min(self.prompt_k, N), dim=1)
+        prompts = torch.gather(x, 1, topk_idx.unsqueeze(-1).expand(-1, -1, C))
+        context = prompts.mean(dim=1)
+
+        # Routing
+        router_logits = self.router(context)
+        router_probs = F.softmax(router_logits, dim=-1)
+
+        # Top-K selection
+        topk_weights, topk_indices = torch.topk(router_probs, self.top_k, dim=-1)
+        topk_weights = topk_weights / (topk_weights.sum(dim=-1, keepdim=True) + 1e-9)
+
+        # Expert outputs + weighted combination
+        expert_outputs = torch.stack([expert(x) for expert in self.experts], dim=2)
+
+        expert_mask = torch.zeros(B, self.num_experts, device=x.device)
+        expert_mask.scatter_(1, topk_indices, 1)
+
+        indices_expanded = topk_indices.unsqueeze(1).unsqueeze(-1).expand(B, N, self.top_k, C)
+        selected_outputs = torch.gather(expert_outputs, 2, indices_expanded)
+
+        weights_expanded = topk_weights.unsqueeze(1).unsqueeze(-1)
+        output = (selected_outputs * weights_expanded).sum(dim=2)
+
+        # Load balancing loss
+        f = expert_mask.float().mean(dim=0)
+        P = router_probs.mean(dim=0)
+        lb_loss = self.num_experts * (f * P).sum() * self.lb_weight
+
+        router_info = {
+            'lb_loss': lb_loss,
+            'expert_usage': expert_mask.mean(dim=0),
+        }
+        return output, router_info
+
 
 class ViTill(nn.Module):
     def __init__(
@@ -29,6 +99,7 @@ class ViTill(nn.Module):
         self.fuse_layer_decoder = fuse_layer_decoder
         self.remove_class_token = remove_class_token
         self.encoder_require_grad_layer = encoder_require_grad_layer
+        self.use_moe = isinstance(bottleneck, MoEBottleneck)
 
         if not hasattr(self.encoder, 'num_register_tokens'):
             self.encoder.num_register_tokens = 0
@@ -42,8 +113,12 @@ class ViTill(nn.Module):
 
         x = self.fuse_feature(en_list)
 
-        for i, blk in enumerate(self.bottleneck):
-            x = blk(x)
+        router_info = None
+        if self.use_moe:
+            x, router_info = self.bottleneck(x)
+        else:
+            for i, blk in enumerate(self.bottleneck):
+                x = blk(x)
 
         if self.mask_neighbor_size > 0:
             attn_mask = self.generate_mask(side, x.device)
@@ -62,6 +137,8 @@ class ViTill(nn.Module):
         en = [e.permute(0, 2, 1).reshape([x.shape[0], -1, side, side]).contiguous() for e in en]
         de = [d.permute(0, 2, 1).reshape([x.shape[0], -1, side, side]).contiguous() for d in de]
 
+        if router_info is not None:
+            return en, de, router_info
         return en, de
 
 

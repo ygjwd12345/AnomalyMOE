@@ -70,8 +70,8 @@ def setup_seed(seed):
 def train(item_list):
     setup_seed(1)
 
-    total_iters = 10000
-    batch_size = 12 # Cuda OOM when setting 16 with 32GB of GPU memory.
+    total_iters = 20000
+    batch_size = 16
     image_size = 512
     crop_size = 448
 
@@ -79,6 +79,7 @@ def train(item_list):
 
     train_data_list = []
     test_data_list = []
+
     for i, item in enumerate(item_list):
         train_path = os.path.join(args.data_path, item, 'train')
         test_path = os.path.join(args.data_path, item)
@@ -96,14 +97,15 @@ def train(item_list):
     train_dataloader = torch.utils.data.DataLoader(train_data, batch_size=batch_size, shuffle=True, num_workers=4,
                                                    drop_last=True)
 
-    target_layers = [4, 6, 8, 10, 12, 14, 16, 18]
+    target_layers = [2, 3, 4, 5, 6, 7, 8, 9]
     fuse_layer_encoder = [[0, 1, 2, 3], [4, 5, 6, 7]]
     fuse_layer_decoder = [[0, 1, 2, 3], [4, 5, 6, 7]]
 
-    encoder_name = 'dinov3_vitl16'
-    encoder_weight = 'weights/dinov3_vitl16_pretrain_lvd1689m-8aa4cbdd.pth'
+    encoder_name = 'dinov3_vitb16'
+    encoder_weight = 'weights/dinov3_vitb16_pretrain_lvd1689m-73cec8be.pth'
 
-    encoder = load_dinov3_model(encoder_name, layers_to_extract_from=target_layers,  pretrained_weight_path=encoder_weight)
+    encoder = load_dinov3_model(encoder_name, layers_to_extract_from=target_layers,
+                                pretrained_weight_path=encoder_weight)
 
     if 'vits' in encoder_name:
         embed_dim, num_heads = 384, 6
@@ -114,12 +116,8 @@ def train(item_list):
     else:
         raise "Architecture not in vits, vitb, vitl."
 
-    bottleneck = []
+    # Decoder
     decoder = []
-
-    bottleneck.append(bMlp(embed_dim, embed_dim * 4, embed_dim, drop=0.2))
-    bottleneck = nn.ModuleList(bottleneck)
-
     for i in range(8):
         blk = VitBlock(dim=embed_dim, num_heads=num_heads, mlp_ratio=4.,
                        qkv_bias=True, norm_layer=partial(nn.LayerNorm, eps=1e-8),
@@ -127,11 +125,28 @@ def train(item_list):
         decoder.append(blk)
     decoder = nn.ModuleList(decoder)
 
-    model = ViTill(encoder=encoder, bottleneck=bottleneck, decoder=decoder, target_layers=target_layers,
-                   mask_neighbor_size=0, fuse_layer_encoder=fuse_layer_encoder, fuse_layer_decoder=fuse_layer_decoder)
-    model = model.to(device)
+    # ==================== Model Configuration ====================
+    # 最优配置: MoE-2 Expert, bias=-5, top_k=1
+    model = ViTill(
+        encoder=encoder,
+        bottleneck=None,
+        decoder=decoder,
+        target_layers=target_layers,
+        mask_neighbor_size=0,
+        fuse_layer_encoder=fuse_layer_encoder,
+        fuse_layer_decoder=fuse_layer_decoder,
+        embed_dim=embed_dim,
+        use_moe_bottleneck=True,
+        num_experts=2,
+        top_k=1,
+        prompt_k=16,
+        moe_dropout=0.2,
+        lb_weight=0.01,
+    )
+    trainable = nn.ModuleList([model.bottleneck, decoder])
+    use_moe = True
 
-    trainable = nn.ModuleList([bottleneck, decoder])
+    model = model.to(device)
 
     for m in trainable.modules():
         if isinstance(m, nn.Linear):
@@ -142,8 +157,14 @@ def train(item_list):
             nn.init.constant_(m.bias, 0)
             nn.init.constant_(m.weight, 1.0)
 
+    # MoE Router 初始化: weight=0, bias=-5
+    if hasattr(model.bottleneck, 'router'):
+        nn.init.constant_(model.bottleneck.router[2].weight, 0)
+        nn.init.constant_(model.bottleneck.router[2].bias, -5)
+        print_fn('MoE Router initialized: weight=0, bias=-5')
+
     optimizer = StableAdamW([{'params': trainable.parameters()}],
-                            lr=2e-3, betas=(0.9, 0.999), weight_decay=1e-4, amsgrad=False, eps=1e-10)
+                            lr=2e-3, betas=(0.9, 0.999), weight_decay=1e-4, amsgrad=True, eps=1e-10)
     lr_scheduler = WarmCosineScheduler(optimizer, base_value=2e-3, final_value=2e-4, total_iters=total_iters,
                                        warmup_iters=100)
 
@@ -155,20 +176,37 @@ def train(item_list):
         model.encoder.eval()
 
         loss_list = []
+        lb_loss_list = []  # Load balancing loss tracking
         for img, label in train_dataloader:
             img = img.to(device)
             label = label.to(device)
-            en, de = model(img)
+
+            # Forward: 根据配置决定是否获取 router_info
+            if use_moe:
+                en, de, router_info = model(img, return_router_info=True)
+            else:
+                en, de = model(img)  # Baseline: 不需要 router_info
+                router_info = {}
+
             p_final = 0.9
             p = min(p_final * it / 1000, p_final)
-            loss = global_cosine_hm_percent(en, de, p=p, factor=0.1)
+            recon_loss = global_cosine_hm_percent(en, de, p=p, factor=0.1)
+
+            # Add load balancing loss from MoE Bottleneck (仅当 MoE 启用时)
+            lb_loss = 0
+            if use_moe and 'moe' in router_info and router_info['moe'] is not None:
+                lb_loss = router_info['moe']['lb_loss']
+
+            loss = recon_loss + lb_loss
 
             optimizer.zero_grad()
             loss.backward()
             nn.utils.clip_grad_norm(trainable.parameters(), max_norm=0.1)
 
             optimizer.step()
-            loss_list.append(loss.item())
+            loss_list.append(recon_loss.item())
+            if isinstance(lb_loss, torch.Tensor):
+                lb_loss_list.append(lb_loss.item())
             lr_scheduler.step()
 
             if (it + 1) % 5000 == 0:
@@ -206,7 +244,19 @@ def train(item_list):
             if it == total_iters:
                 break
 
-        print_fn('iter [{}/{}], loss:{:.4f}'.format(it, total_iters, np.mean(loss_list)))
+        if lb_loss_list:
+            # 监控 expert usage 分布，验证 router 在学习
+            if use_moe and 'moe' in router_info and router_info['moe'] is not None:
+                expert_usage = router_info['moe']['expert_usage'].cpu().numpy()
+                usage_str = ', '.join([f'E{i}:{u:.2f}' for i, u in enumerate(expert_usage)])
+                print_fn('iter [{}/{}], recon_loss:{:.4f}, lb_loss:{:.4f}, usage:[{}]'.format(
+                    it, total_iters, np.mean(loss_list), np.mean(lb_loss_list), usage_str))
+            else:
+                print_fn('iter [{}/{}], recon_loss:{:.4f}, lb_loss:{:.4f}'.format(
+                    it, total_iters, np.mean(loss_list), np.mean(lb_loss_list)))
+        else:
+            print_fn('iter [{}/{}], loss:{:.4f}'.format(it, total_iters, np.mean(loss_list)))
+    torch.save(model.state_dict(), os.path.join(args.save_dir, args.save_name, 'model.pth'))
 
     return
 
@@ -217,7 +267,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='')
     parser.add_argument('--data_path', type=str, default='./dataset/mvtec_anomaly_detection')
     parser.add_argument('--save_dir', type=str, default='./saved_results')
-    parser.add_argument('--save_name', type=str, default='vitill_mvtec_uni_dinov3_large')
+    parser.add_argument('--save_name', type=str, default='mvtec_uni_dinov3_base_prompt_MOE_sin')
     args = parser.parse_args()
 
     item_list = ['carpet', 'grid', 'leather', 'tile', 'wood', 'bottle', 'cable', 'capsule',

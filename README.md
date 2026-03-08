@@ -1,165 +1,169 @@
 <div align="center">
 
-# Dinomaly with DinoV3
+# AnomalyMOE
+
+**Mixture-of-Experts Bottleneck with Entropy-Based Routing for Unified Anomaly Detection**
+
+Built on top of [Dinomaly](https://github.com/cnulab/Dinomaly) with DINOv3 encoder.
+
 </div>
-Cuda: 12.8    
-  
-Torch: 2.7.0+cu128   
-  
-For DinoV3/Base-16  
-```
-python dinomaly_mvtec_uni_base.py
 
-train image number:3629
-iter [226/10000], loss:0.1372
-iter [452/10000], loss:0.0592
-iter [678/10000], loss:0.0489
-iter [904/10000], loss:0.0447
-iter [1130/10000], loss:0.0411
-iter [1356/10000], loss:0.0400
-iter [1582/10000], loss:0.0399
-iter [1808/10000], loss:0.0395
-iter [2034/10000], loss:0.0555
-iter [2260/10000], loss:0.0414
-iter [2486/10000], loss:0.0393
-iter [2712/10000], loss:0.0385
-iter [2938/10000], loss:0.0552
-iter [3164/10000], loss:0.0455
-iter [3390/10000], loss:0.0391
-iter [3616/10000], loss:0.0377
-iter [3842/10000], loss:0.0372
-iter [4068/10000], loss:0.0368
-iter [4294/10000], loss:0.0368
-iter [4520/10000], loss:0.0360
-iter [4746/10000], loss:0.0359
-iter [4972/10000], loss:0.0354
-carpet: I-Auroc:0.9992, I-AP:0.9998, I-F1:0.9944, P-AUROC:0.9955, P-AP:0.7875, P-F1:0.7632, P-AUPRO:0.9830
-grid: I-Auroc:1.0000, I-AP:1.0000, I-F1:1.0000, P-AUROC:0.9932, P-AP:0.5564, P-F1:0.5672, P-AUPRO:0.9623
-leather: I-Auroc:1.0000, I-AP:1.0000, I-F1:1.0000, P-AUROC:0.9944, P-AP:0.6193, P-F1:0.5693, P-AUPRO:0.9689
-tile: I-Auroc:0.9986, I-AP:0.9995, I-F1:0.9940, P-AUROC:0.9879, P-AP:0.8730, P-F1:0.8116, P-AUPRO:0.9210
-wood: I-Auroc:0.9833, I-AP:0.9947, I-F1:0.9752, P-AUROC:0.9756, P-AP:0.7952, P-F1:0.7264, P-AUPRO:0.9390
-bottle: I-Auroc:1.0000, I-AP:1.0000, I-F1:1.0000, P-AUROC:0.9902, P-AP:0.8864, P-F1:0.8106, P-AUPRO:0.9646
-cable: I-Auroc:0.9983, I-AP:0.9990, I-F1:0.9945, P-AUROC:0.9847, P-AP:0.7405, P-F1:0.7225, P-AUPRO:0.9434
-capsule: I-Auroc:0.9737, I-AP:0.9938, I-F1:0.9820, P-AUROC:0.9873, P-AP:0.6011, P-F1:0.5903, P-AUPRO:0.9694
-hazelnut: I-Auroc:1.0000, I-AP:1.0000, I-F1:1.0000, P-AUROC:0.9952, P-AP:0.8358, P-F1:0.8013, P-AUPRO:0.9717
-metal_nut: I-Auroc:1.0000, I-AP:1.0000, I-F1:1.0000, P-AUROC:0.9769, P-AP:0.8535, P-F1:0.8781, P-AUPRO:0.9612
-pill: I-Auroc:0.9839, I-AP:0.9972, I-F1:0.9823, P-AUROC:0.9738, P-AP:0.7526, P-F1:0.7056, P-AUPRO:0.9732
-screw: I-Auroc:0.9715, I-AP:0.9912, I-F1:0.9520, P-AUROC:0.9938, P-AP:0.5957, P-F1:0.5909, P-AUPRO:0.9711
-toothbrush: I-Auroc:1.0000, I-AP:1.0000, I-F1:1.0000, P-AUROC:0.9925, P-AP:0.6426, P-F1:0.6878, P-AUPRO:0.9586
-transistor: I-Auroc:0.9867, I-AP:0.9800, I-F1:0.9398, P-AUROC:0.9267, P-AP:0.6087, P-F1:0.5797, P-AUPRO:0.7481
-zipper: I-Auroc:1.0000, I-AP:1.0000, I-F1:1.0000, P-AUROC:0.9922, P-AP:0.7925, P-F1:0.7467, P-AUPRO:0.9688
-Mean: I-Auroc:0.9930, I-AP:0.9970, I-F1:0.9876, P-AUROC:0.9840, P-AP:0.7294, P-F1:0.7034, P-AUPRO:0.9470
-iter [5198/10000], loss:0.0355
-iter [5424/10000], loss:0.0347
-iter [5650/10000], loss:0.0373
-iter [5876/10000], loss:0.0363
-iter [6102/10000], loss:0.0337
-iter [6328/10000], loss:0.0333
-iter [6554/10000], loss:0.0330
-iter [6780/10000], loss:0.0327
-iter [7006/10000], loss:0.0324
-iter [7232/10000], loss:0.0321
-iter [7458/10000], loss:0.0318
-iter [7684/10000], loss:0.0316
-iter [7910/10000], loss:0.0312
-iter [8136/10000], loss:0.0310
-iter [8362/10000], loss:0.0307
-iter [8588/10000], loss:0.0305
-iter [8814/10000], loss:0.0305
-iter [9040/10000], loss:0.0300
-iter [9266/10000], loss:0.0298
-iter [9492/10000], loss:0.0297
-iter [9718/10000], loss:0.0295
-iter [9944/10000], loss:0.0295
-iter [10000/10000], loss:0.0294
-carpet: I-Auroc:0.9992, I-AP:0.9998, I-F1:0.9944, P-AUROC:0.9953, P-AP:0.7811, P-F1:0.7592, P-AUPRO:0.9785
-grid: I-Auroc:1.0000, I-AP:1.0000, I-F1:1.0000, P-AUROC:0.9936, P-AP:0.5676, P-F1:0.5732, P-AUPRO:0.9627
-leather: I-Auroc:1.0000, I-AP:1.0000, I-F1:1.0000, P-AUROC:0.9945, P-AP:0.6033, P-F1:0.5726, P-AUPRO:0.9755
-tile: I-Auroc:0.9982, I-AP:0.9993, I-F1:0.9940, P-AUROC:0.9855, P-AP:0.8543, P-F1:0.7956, P-AUPRO:0.9156
-wood: I-Auroc:0.9895, I-AP:0.9967, I-F1:0.9752, P-AUROC:0.9762, P-AP:0.7910, P-F1:0.7213, P-AUPRO:0.9370
-bottle: I-Auroc:1.0000, I-AP:1.0000, I-F1:1.0000, P-AUROC:0.9911, P-AP:0.8910, P-F1:0.8203, P-AUPRO:0.9678
-cable: I-Auroc:1.0000, I-AP:1.0000, I-F1:1.0000, P-AUROC:0.9882, P-AP:0.7738, P-F1:0.7507, P-AUPRO:0.9501
-capsule: I-Auroc:0.9852, I-AP:0.9967, I-F1:0.9864, P-AUROC:0.9885, P-AP:0.6222, P-F1:0.5970, P-AUPRO:0.9734
-hazelnut: I-Auroc:1.0000, I-AP:1.0000, I-F1:1.0000, P-AUROC:0.9951, P-AP:0.8334, P-F1:0.7899, P-AUPRO:0.9727
-metal_nut: I-Auroc:1.0000, I-AP:1.0000, I-F1:1.0000, P-AUROC:0.9746, P-AP:0.8330, P-F1:0.8719, P-AUPRO:0.9537
-pill: I-Auroc:0.9869, I-AP:0.9978, I-F1:0.9823, P-AUROC:0.9765, P-AP:0.7502, P-F1:0.7086, P-AUPRO:0.9729
-screw: I-Auroc:0.9809, I-AP:0.9940, I-F1:0.9610, P-AUROC:0.9949, P-AP:0.6272, P-F1:0.6100, P-AUPRO:0.9786
-toothbrush: I-Auroc:1.0000, I-AP:1.0000, I-F1:1.0000, P-AUROC:0.9923, P-AP:0.6323, P-F1:0.6834, P-AUPRO:0.9608
-transistor: I-Auroc:0.9871, I-AP:0.9810, I-F1:0.9512, P-AUROC:0.9377, P-AP:0.6359, P-F1:0.6005, P-AUPRO:0.7639
-zipper: I-Auroc:1.0000, I-AP:1.0000, I-F1:1.0000, P-AUROC:0.9935, P-AP:0.8110, P-F1:0.7599, P-AUPRO:0.9740
-Mean: I-Auroc:0.9951, I-AP:0.9977, I-F1:0.9896, P-AUROC:0.9852, P-AP:0.7338, P-F1:0.7076, P-AUPRO:0.9491
+## Overview
+
+AnomalyMOE replaces the single bottleneck MLP in the reconstruction-based anomaly detection pipeline with a **Mixture-of-Experts (MoE) Bottleneck**. A lightweight router dynamically assigns each input to specialized expert sub-networks, enabling expert-level specialization across diverse object categories in unified (multi-class) anomaly detection.
+
+**Key contribution**: We propose an **Entropy-Based Routing Constraint (CE loss)** that replaces the traditional non-differentiable `f*P` load balancing loss. CE loss provides purely differentiable gradients to the router through:
+- **Local Sharpness**: Minimizes per-sample routing entropy for confident expert assignment
+- **Global Balance**: Maximizes batch-level entropy for uniform expert utilization  
+- **Orthogonality**: Keeps router projection weights distinct
+
+The router autonomously discovers **semantic visual clusters** (e.g., textures vs. round objects vs. small elongated objects), achieving expert-level specialization without any category labels during training.
+
+## Architecture
+
+```
+Input Image
+    |
+[DINOv3 Encoder] (frozen)
+    |
+[Feature Fusion] (multi-layer aggregation)
+    |
+[MoE Bottleneck]
+    |--- Router: context-based top-k expert selection
+    |--- Expert 0: bMlp (specialized for category group A)
+    |--- Expert 1: bMlp (specialized for category group B)
+    |--- Expert 2: bMlp (specialized for category group C)
+    |--- Expert 3: bMlp (specialized for category group D)
+    |
+[Decoder] (8-layer Linear Attention Transformer)
+    |
+[Anomaly Map] (encoder-decoder cosine distance)
 ```
 
-For DinoV3/Large-16
-```
-python dinomaly_mvtec_uni_large.py
+## Results on MVTec AD (Unified)
 
+| Method | I-AUROC | I-AP | I-F1 | P-AUROC | P-AP | P-F1 | P-AUPRO |
+|--------|---------|------|------|---------|------|------|---------|
+| Dinomaly-v3 (baseline) | 99.5 | 99.7 | 98.9 | 98.5 | 73.4 | 70.7 | 94.9 |
+| **MoE-4E top3 + CE (50K)** | **99.6** | **99.8** | **99.0** | **98.6** | **74.6** | **71.3** | **95.2** |
 
-train image number:3629
-iter [302/10000], loss:0.1136
-iter [604/10000], loss:0.0469
-iter [906/10000], loss:0.0514
-iter [1208/10000], loss:0.0429
-iter [1510/10000], loss:0.0370
-iter [1812/10000], loss:0.0352
-iter [2114/10000], loss:0.0342
-iter [2416/10000], loss:0.0394
-iter [2718/10000], loss:0.0335
-iter [3020/10000], loss:0.0323
-iter [3322/10000], loss:0.0320
-iter [3624/10000], loss:0.0316
-iter [3926/10000], loss:0.0351
-iter [4228/10000], loss:0.0310
-iter [4530/10000], loss:0.0300
-iter [4832/10000], loss:0.0299
-carpet: I-Auroc:0.9956, I-AP:0.9988, I-F1:0.9944, P-AUROC:0.9943, P-AP:0.7187, P-F1:0.7348, P-AUPRO:0.9759
-grid: I-Auroc:1.0000, I-AP:1.0000, I-F1:1.0000, P-AUROC:0.9941, P-AP:0.5697, P-F1:0.5921, P-AUPRO:0.9675
-leather: I-Auroc:1.0000, I-AP:1.0000, I-F1:1.0000, P-AUROC:0.9951, P-AP:0.6242, P-F1:0.6159, P-AUPRO:0.9736
-tile: I-Auroc:1.0000, I-AP:1.0000, I-F1:1.0000, P-AUROC:0.9891, P-AP:0.8707, P-F1:0.8201, P-AUPRO:0.9399
-wood: I-Auroc:0.9860, I-AP:0.9955, I-F1:0.9756, P-AUROC:0.9768, P-AP:0.8030, P-F1:0.7321, P-AUPRO:0.9407
-bottle: I-Auroc:1.0000, I-AP:1.0000, I-F1:1.0000, P-AUROC:0.9925, P-AP:0.9062, P-F1:0.8454, P-AUPRO:0.9683
-cable: I-Auroc:0.9991, I-AP:0.9994, I-F1:0.9892, P-AUROC:0.9852, P-AP:0.7092, P-F1:0.7069, P-AUPRO:0.9458
-capsule: I-Auroc:0.9848, I-AP:0.9965, I-F1:0.9863, P-AUROC:0.9898, P-AP:0.6073, P-F1:0.5957, P-AUPRO:0.9757
-hazelnut: I-Auroc:1.0000, I-AP:1.0000, I-F1:1.0000, P-AUROC:0.9960, P-AP:0.8507, P-F1:0.8178, P-AUPRO:0.9768
-metal_nut: I-Auroc:1.0000, I-AP:1.0000, I-F1:1.0000, P-AUROC:0.9874, P-AP:0.9103, P-F1:0.9041, P-AUPRO:0.9643
-pill: I-Auroc:0.9918, I-AP:0.9986, I-F1:0.9893, P-AUROC:0.9822, P-AP:0.7864, P-F1:0.7175, P-AUPRO:0.9793
-screw: I-Auroc:0.9795, I-AP:0.9935, I-F1:0.9580, P-AUROC:0.9942, P-AP:0.5869, P-F1:0.5778, P-AUPRO:0.9696
-toothbrush: I-Auroc:1.0000, I-AP:1.0000, I-F1:1.0000, P-AUROC:0.9928, P-AP:0.6660, P-F1:0.6871, P-AUPRO:0.9591
-transistor: I-Auroc:0.9904, I-AP:0.9856, I-F1:0.9500, P-AUROC:0.9375, P-AP:0.6284, P-F1:0.5871, P-AUPRO:0.7951
-zipper: I-Auroc:1.0000, I-AP:1.0000, I-F1:1.0000, P-AUROC:0.9923, P-AP:0.7870, P-F1:0.7450, P-AUPRO:0.9696
-Mean: I-Auroc:0.9951, I-AP:0.9979, I-F1:0.9895, P-AUROC:0.9866, P-AP:0.7350, P-F1:0.7120, P-AUPRO:0.9534
-iter [5134/10000], loss:0.0293
-iter [5436/10000], loss:0.0288
-iter [5738/10000], loss:0.0281
-iter [6040/10000], loss:0.0279
-iter [6342/10000], loss:0.0275
-iter [6644/10000], loss:0.0281
-iter [6946/10000], loss:0.0270
-iter [7248/10000], loss:0.0260
-iter [7550/10000], loss:0.0258
-iter [7852/10000], loss:0.0254
-iter [8154/10000], loss:0.0250
-iter [8456/10000], loss:0.0248
-iter [8758/10000], loss:0.0245
-iter [9060/10000], loss:0.0243
-iter [9362/10000], loss:0.0241
-iter [9664/10000], loss:0.0239
-iter [9966/10000], loss:0.0238
-iter [10000/10000], loss:0.0240
-carpet: I-Auroc:0.9976, I-AP:0.9993, I-F1:0.9944, P-AUROC:0.9942, P-AP:0.7080, P-F1:0.7322, P-AUPRO:0.9754
-grid: I-Auroc:1.0000, I-AP:1.0000, I-F1:1.0000, P-AUROC:0.9945, P-AP:0.5874, P-F1:0.6043, P-AUPRO:0.9705
-leather: I-Auroc:1.0000, I-AP:1.0000, I-F1:1.0000, P-AUROC:0.9951, P-AP:0.6156, P-F1:0.6134, P-AUPRO:0.9773
-tile: I-Auroc:1.0000, I-AP:1.0000, I-F1:1.0000, P-AUROC:0.9881, P-AP:0.8636, P-F1:0.8099, P-AUPRO:0.9307
-wood: I-Auroc:0.9886, I-AP:0.9963, I-F1:0.9756, P-AUROC:0.9784, P-AP:0.7998, P-F1:0.7291, P-AUPRO:0.9471
-bottle: I-Auroc:1.0000, I-AP:1.0000, I-F1:1.0000, P-AUROC:0.9929, P-AP:0.9076, P-F1:0.8496, P-AUPRO:0.9714
-cable: I-Auroc:0.9996, I-AP:0.9998, I-F1:0.9946, P-AUROC:0.9893, P-AP:0.7648, P-F1:0.7488, P-AUPRO:0.9548
-capsule: I-Auroc:0.9848, I-AP:0.9966, I-F1:0.9817, P-AUROC:0.9899, P-AP:0.6223, P-F1:0.5970, P-AUPRO:0.9757
-hazelnut: I-Auroc:1.0000, I-AP:1.0000, I-F1:1.0000, P-AUROC:0.9960, P-AP:0.8469, P-F1:0.8148, P-AUPRO:0.9762
-metal_nut: I-Auroc:1.0000, I-AP:1.0000, I-F1:1.0000, P-AUROC:0.9852, P-AP:0.8797, P-F1:0.8972, P-AUPRO:0.9591
-pill: I-Auroc:0.9943, I-AP:0.9990, I-F1:0.9893, P-AUROC:0.9824, P-AP:0.7690, P-F1:0.7156, P-AUPRO:0.9783
-screw: I-Auroc:0.9840, I-AP:0.9949, I-F1:0.9658, P-AUROC:0.9956, P-AP:0.6348, P-F1:0.6084, P-AUPRO:0.9774
-toothbrush: I-Auroc:1.0000, I-AP:1.0000, I-F1:1.0000, P-AUROC:0.9918, P-AP:0.6164, P-F1:0.6612, P-AUPRO:0.9598
-transistor: I-Auroc:0.9946, I-AP:0.9915, I-F1:0.9756, P-AUROC:0.9443, P-AP:0.6379, P-F1:0.5923, P-AUPRO:0.8052
-zipper: I-Auroc:1.0000, I-AP:1.0000, I-F1:1.0000, P-AUROC:0.9932, P-AP:0.8014, P-F1:0.7544, P-AUPRO:0.9734
-Mean: I-Auroc:0.9962, I-AP:0.9985, I-F1:0.9918, P-AUROC:0.9874, P-AP:0.7370, P-F1:0.7152, P-AUPRO:0.9555
+## Quick Start
+
+### Environment
+
 ```
+CUDA >= 12.x
+Python >= 3.10
+PyTorch >= 2.0
+```
+
+### Installation
+
+```bash
+pip install -r requirements.txt
+```
+
+Download DINOv3 weights to `weights/`:
+- `dinov3_vitb16_pretrain_lvd1689m-73cec8be.pth`
+
+### Training
+
+```bash
+# Baseline (no MoE)
+CUDA_VISIBLE_DEVICES=0 python dinomaly_mvtec_uni_base.py
+
+# MoE Bottleneck with CE loss (recommended: 4 experts, top-3, 50K iters)
+CUDA_VISIBLE_DEVICES=0 python dinomaly_mvtec_uni_base_moe.py \
+    --save_name mvtec_E4T3_ce_50k
+
+# VisA dataset
+CUDA_VISIBLE_DEVICES=0 python dinomaly_visa_uni_moe.py \
+    --save_name visa_E4T3_ce_50k
+```
+
+### Testing Saved Models
+
+```bash
+# Test baseline
+python test_model.py --dataset mvtec \
+    --model_path ./saved_results/mvtec_base/model.pth
+
+# Test MoE model
+python test_model.py --dataset mvtec \
+    --model_path ./saved_results/mvtec_E4T3_ce_50k/model.pth \
+    --use_moe --num_experts 4 --top_k 3
+```
+
+### Router Visualization
+
+```bash
+# All visualizations (needs trained MoE model + log files)
+python visualize_router.py --mode all --dataset mvtec \
+    --model_path ./saved_results/mvtec_E4T3_ce_50k/model.pth \
+    --num_experts 4 --top_k 3 \
+    --log_fp ./saved_results/mvtec_E4T3_fp/log.txt \
+    --log_ce ./saved_results/mvtec_E4T3_ce_50k/log.txt
+
+# Only heatmap + normal/anomaly analysis
+python visualize_router.py --mode heatmap --dataset mvtec \
+    --model_path ./saved_results/mvtec_E4T3_ce_50k/model.pth \
+    --num_experts 4 --top_k 3
+
+# Only routing evolution comparison
+python visualize_router.py --mode evolution \
+    --log_fp ./saved_results/mvtec_E4T3_fp/log.txt \
+    --log_ce ./saved_results/mvtec_E4T3_ce_50k/log.txt
+
+# Per-expert anomaly map decomposition
+python visualize_router.py --mode expert_maps --dataset mvtec \
+    --model_path ./saved_results/mvtec_E4T3_ce_50k/model.pth \
+    --num_experts 4 --top_k 3 \
+    --vis_categories carpet bottle transistor
+```
+
+Visualizations are saved to `./vis_results/` as both PNG images and Excel files for secondary plotting.
+
+## Visualization Experiments
+
+| Experiment | Description |
+|-----------|-------------|
+| **Exp 1**: Category-Expert Heatmap | 3-panel heatmap showing raw probability, top-k selection frequency, and contribution weight per category |
+| **Exp 2**: Normal vs Anomaly | Compares routing distributions between normal and anomaly samples |
+| **Exp 3**: Routing Evolution | Training curves comparing f\*P vs CE routing probability dynamics |
+| **Exp 4**: Expert Anomaly Maps | Per-expert anomaly map decomposition for visual inspection |
+| **Exp 5**: Router Weight Similarity | Cosine similarity matrix of router projection weights |
+
+## MoE Configuration
+
+Key hyperparameters in `dinomaly_mvtec_uni_base_moe.py`:
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `num_experts` | 4 | Number of expert bMlp networks |
+| `top_k` | 3 | Number of experts selected per sample |
+| `routing_loss` | `'entropy'` | `'entropy'` (CE) or `'legacy'` (f\*P) |
+| `lambda_local` | 0.5 | Local entropy sharpness weight |
+| `lambda_global` | 0.5 | Global entropy balance weight |
+| `lambda_ortho` | 0 | Router weight orthogonality weight |
+| `total_iters` | 50000 | Training iterations |
+
+## File Structure
+
+```
+.
+├── models/
+│   ├── uad.py                          # MoEBottleneck, ViTill, entropy routing
+│   └── vision_transformer.py           # bMlp, Attention blocks
+├── dinomaly_mvtec_uni_base.py          # MVTec baseline (no MoE)
+├── dinomaly_mvtec_uni_base_moe.py      # MVTec with MoE + CE loss
+├── dinomaly_visa_uni.py                # VisA baseline
+├── dinomaly_visa_uni_moe.py            # VisA with MoE + CE loss
+├── visualize_router.py                 # Router visualization toolkit
+├── test_model.py                       # Evaluate saved checkpoints
+├── dataset.py                          # MVTec/VisA data loading
+└── utils.py                            # Evaluation, loss functions
+```
+
+## Acknowledgements
+
+This project is built upon [Dinomaly](https://github.com/cnulab/Dinomaly).

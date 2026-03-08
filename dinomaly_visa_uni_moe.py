@@ -111,15 +111,18 @@ def train(item_list):
     else:
         raise "Architecture not in vits, vitb, vitl."
 
-    # ===== MoE Bottleneck 替换原始单 bMlp =====
+    # ===== MoE Bottleneck (Entropy-Based Routing) =====
     bottleneck = MoEBottleneck(
         dim=embed_dim,
         hidden_dim=embed_dim * 4,
-        num_experts=2,
-        top_k=1,
+        num_experts=4,
+        top_k=3,
         prompt_k=16,
         dropout=0.2,
-        lb_weight=0.01,
+        routing_loss='entropy',
+        lambda_local=0.1,
+        lambda_global=0.5,
+        lambda_ortho=0.1,
     )
 
     decoder = []
@@ -153,8 +156,13 @@ def train(item_list):
     print_fn('MoE Config:')
     print_fn(f'  num_experts={bottleneck.num_experts}, top_k={bottleneck.top_k}, '
              f'prompt_k={bottleneck.prompt_k}')
-    print_fn(f'  hidden_dim={bottleneck.hidden_dim}, dropout={bottleneck.experts[0].drop.p}, '
-             f'lb_weight={bottleneck.lb_weight}')
+    print_fn(f'  hidden_dim={bottleneck.hidden_dim}, dropout={bottleneck.experts[0].drop.p}')
+    print_fn(f'  routing_loss={bottleneck.routing_loss}')
+    if bottleneck.routing_loss == 'entropy':
+        print_fn(f'  lambda_local={bottleneck.lambda_local}, lambda_global={bottleneck.lambda_global}, '
+                 f'lambda_ortho={bottleneck.lambda_ortho}')
+    else:
+        print_fn(f'  lb_weight={bottleneck.lb_weight}, diversity_weight={bottleneck.diversity_weight}')
     print_fn(f'  router_init: weight=0, bias=-5')
     print_fn(f'  total_iters={total_iters}, amsgrad=True')
     print_fn('=' * 60)
@@ -165,6 +173,8 @@ def train(item_list):
                                        warmup_iters=100)
 
     print_fn('train image number:{}'.format(len(train_data)))
+
+    routing_history = {'iters': [], 'probs': [], 'usage': []}
 
     it = 0
     for epoch in range(int(np.ceil(total_iters / len(train_dataloader)))):
@@ -180,8 +190,18 @@ def train(item_list):
             p_final = 0.9
             p = min(p_final * it / 1000, p_final)
             recon_loss = global_cosine_hm_percent(en, de, p=p, factor=0.1)
-            lb_loss = router_info['lb_loss']
-            loss = recon_loss + lb_loss
+
+            if bottleneck.routing_loss == 'entropy':
+                local_ent = router_info['local_ent_loss']
+                global_ent = router_info['global_ent_loss']
+                ortho = router_info['ortho_loss']
+                aux_loss = (bottleneck.lambda_local * local_ent
+                            + bottleneck.lambda_global * global_ent
+                            + bottleneck.lambda_ortho * ortho)
+            else:
+                aux_loss = router_info['lb_loss'] + router_info['diversity_loss']
+
+            loss = recon_loss + aux_loss
 
             optimizer.zero_grad()
             loss.backward()
@@ -228,10 +248,30 @@ def train(item_list):
 
         expert_usage = router_info['expert_usage'].cpu().numpy()
         usage_str = ', '.join([f'E{i}:{u:.2f}' for i, u in enumerate(expert_usage)])
-        print_fn('iter [{}/{}], loss:{:.4f}, lb:{:.4f}, usage:[{}]'.format(
-            it, total_iters, np.mean(loss_list), lb_loss.item(), usage_str))
+        if bottleneck.routing_loss == 'entropy':
+            probs_mean = router_info['router_probs_mean'].cpu().numpy()
+            probs_str = ', '.join([f'{p:.3f}' for p in probs_mean])
+            print_fn('iter [{}/{}], loss:{:.4f}, L_ent:{:.4f}, G_ent:{:.4f}, ortho:{:.4f}, '
+                     'P:[{}], usage:[{}]'.format(
+                it, total_iters, np.mean(loss_list),
+                local_ent.item(), global_ent.item(), ortho.item(),
+                probs_str, usage_str))
+        else:
+            print_fn('iter [{}/{}], loss:{:.4f}, lb:{:.4f}, div:{:.4f}, usage:[{}]'.format(
+                it, total_iters, np.mean(loss_list),
+                router_info['lb_loss'].item(), router_info['diversity_loss'].item(), usage_str))
+
+        routing_history['iters'].append(it)
+        routing_history['probs'].append(router_info['router_probs_mean'].cpu().numpy()
+                                        if 'router_probs_mean' in router_info
+                                        else router_info['expert_usage'].cpu().numpy())
+        routing_history['usage'].append(expert_usage)
 
     torch.save(model.state_dict(), os.path.join(args.save_dir, args.save_name, 'model.pth'))
+    np.savez(os.path.join(args.save_dir, args.save_name, 'routing_history.npz'),
+             iters=np.array(routing_history['iters']),
+             probs=np.array(routing_history['probs']),
+             usage=np.array(routing_history['usage']))
 
     return
 

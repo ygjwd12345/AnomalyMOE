@@ -13,16 +13,29 @@ class MoEBottleneck(nn.Module):
     """
     Mixture-of-Experts Bottleneck: 多个 bMlp 作为 experts，
     通过 MLP router 动态选择 top_k 个 expert 并加权组合输出。
+    支持两种路由约束策略：
+      - 'legacy': 传统 f·P load balancing + output diversity loss
+      - 'entropy': 信息论路由约束 (local sharpness + global balance + orthogonality)
     """
     def __init__(self, dim, hidden_dim=None, num_experts=4, top_k=2,
-                 prompt_k=16, dropout=0.2, lb_weight=0.01):
+                 prompt_k=16, dropout=0.2,
+                 routing_loss='entropy',
+                 lb_weight=0.01, diversity_weight=0.0,
+                 lambda_local=0.1, lambda_global=0.5, lambda_ortho=0.1):
         super().__init__()
         self.dim = dim
         self.hidden_dim = hidden_dim or dim * 4
         self.num_experts = num_experts
         self.top_k = top_k
         self.prompt_k = prompt_k
+        self.routing_loss = routing_loss
+
         self.lb_weight = lb_weight
+        self.diversity_weight = diversity_weight
+
+        self.lambda_local = lambda_local
+        self.lambda_global = lambda_global
+        self.lambda_ortho = lambda_ortho
 
         self.router = nn.Sequential(
             nn.Linear(dim, dim // 4),
@@ -34,6 +47,36 @@ class MoEBottleneck(nn.Module):
             bMlp(dim, self.hidden_dim, dim, drop=dropout)
             for _ in range(num_experts)
         ])
+
+    def compute_entropy_routing_loss(self, router_probs):
+        """
+        Entropy-based routing constraints (Mutual Information Maximization).
+        router_probs: [B, num_experts]
+
+        Returns:
+          local_entropy_loss:  minimize per-sample entropy -> sharp routing
+          global_entropy_loss: maximize batch-level entropy -> uniform usage
+          ortho_loss:          keep router weights orthogonal -> distinct experts
+        """
+        # 1. Local Sharpness: minimize per-sample entropy H(p_i)
+        local_entropy_loss = torch.sum(
+            -router_probs * torch.log(router_probs + 1e-6), dim=-1
+        ).mean()
+
+        # 2. Global Balance: maximize batch-mean entropy -> minimize negative entropy
+        mean_probs = router_probs.mean(dim=0)
+        global_entropy_loss = torch.sum(
+            mean_probs * torch.log(mean_probs + 1e-6)
+        )
+
+        # 3. Orthogonality: keep router output-layer weights distinct
+        expert_weights = self.router[-1].weight  # [num_experts, dim//4]
+        weights_norm = F.normalize(expert_weights, p=2, dim=-1)
+        sim_matrix = torch.matmul(weights_norm, weights_norm.t())
+        identity = torch.eye(sim_matrix.size(0), device=sim_matrix.device)
+        ortho_loss = torch.norm(sim_matrix - identity, p='fro')
+
+        return local_entropy_loss, global_entropy_loss, ortho_loss
 
     def forward(self, x):
         B, N, C = x.shape
@@ -65,16 +108,53 @@ class MoEBottleneck(nn.Module):
         weights_expanded = topk_weights.unsqueeze(1).unsqueeze(-1)
         output = (selected_outputs * weights_expanded).sum(dim=2)
 
-        # Load balancing loss
-        f = expert_mask.float().mean(dim=0)
-        P = router_probs.mean(dim=0)
-        lb_loss = self.num_experts * (f * P).sum() * self.lb_weight
+        # Scatter renormalized topk_weights back to full expert dimension
+        topk_weights_full = torch.zeros(B, self.num_experts, device=x.device)
+        topk_weights_full.scatter_(1, topk_indices, topk_weights)
 
-        router_info = {
-            'lb_loss': lb_loss,
-            'expert_usage': expert_mask.mean(dim=0),
-        }
+        # --- Routing loss computation ---
+        if self.routing_loss == 'entropy':
+            local_ent, global_ent, ortho = self.compute_entropy_routing_loss(router_probs)
+            router_info = {
+                'local_ent_loss': local_ent,
+                'global_ent_loss': global_ent,
+                'ortho_loss': ortho,
+                'expert_usage': expert_mask.mean(dim=0),
+                'router_probs_mean': router_probs.mean(dim=0).detach(),
+                'router_probs': router_probs.detach(),
+                'topk_indices': topk_indices.detach(),
+                'topk_weights': topk_weights_full.detach(),
+            }
+        else:
+            # Legacy: f·P load balancing + output diversity
+            f = expert_mask.float().mean(dim=0)
+            P = router_probs.mean(dim=0)
+            lb_loss = self.num_experts * (f * P).sum() * self.lb_weight
+
+            diversity_loss = torch.tensor(0.0, device=x.device)
+            if self.diversity_weight > 0 and self.num_experts > 1:
+                expert_repr = expert_outputs.mean(dim=1)
+                expert_repr = F.normalize(expert_repr, dim=-1)
+                sim_mat = torch.bmm(expert_repr, expert_repr.transpose(1, 2))
+                eye = torch.eye(self.num_experts, device=x.device).unsqueeze(0)
+                off_diag = sim_mat * (1 - eye)
+                diversity_loss = off_diag.pow(2).sum() / (B * self.num_experts * (self.num_experts - 1))
+                diversity_loss = diversity_loss * self.diversity_weight
+
+            router_info = {
+                'lb_loss': lb_loss,
+                'diversity_loss': diversity_loss,
+                'expert_usage': expert_mask.mean(dim=0),
+                'router_probs': router_probs.detach(),
+                'topk_indices': topk_indices.detach(),
+                'topk_weights': topk_weights_full.detach(),
+            }
+
         return output, router_info
+
+    def forward_single_expert(self, x, expert_idx):
+        """Run only a single expert (for visualization / decomposition)."""
+        return self.experts[expert_idx](x)
 
 
 class ViTill(nn.Module):
@@ -141,6 +221,55 @@ class ViTill(nn.Module):
             return en, de, router_info
         return en, de
 
+
+    def forward_decomposed(self, x):
+        """
+        Per-expert anomaly map decomposition.
+        Returns:
+            en: list of encoder feature maps (same as normal forward)
+            de_per_expert: list of [de_map_for_expert_0, de_map_for_expert_1, ...]
+            de_fused: fused decoder output (normal routing)
+            router_info: routing info dict with per-sample router_probs
+        """
+        assert self.use_moe, "forward_decomposed only works with MoE bottleneck"
+
+        en_list = self.encoder.get_intermediate_layers(x, n=self.target_layers, norm=False)
+        side = int(math.sqrt(en_list[0].shape[1]))
+        feat = self.fuse_feature(en_list)
+
+        fused_output, router_info = self.bottleneck(feat)
+
+        if self.mask_neighbor_size > 0:
+            attn_mask = self.generate_mask(side, x.device)
+        else:
+            attn_mask = None
+
+        de_per_expert = []
+        for expert_idx in range(self.bottleneck.num_experts):
+            expert_out = self.bottleneck.forward_single_expert(feat, expert_idx)
+            z = expert_out
+            de_list_e = []
+            for blk in self.decoder:
+                z = blk(z, attn_mask=attn_mask)
+                de_list_e.append(z)
+            de_list_e = de_list_e[::-1]
+            de_e = [self.fuse_feature([de_list_e[idx] for idx in idxs]) for idxs in self.fuse_layer_decoder]
+            de_e = [d.permute(0, 2, 1).reshape([x.shape[0], -1, side, side]).contiguous() for d in de_e]
+            de_per_expert.append(de_e)
+
+        z = fused_output
+        de_list_fused = []
+        for blk in self.decoder:
+            z = blk(z, attn_mask=attn_mask)
+            de_list_fused.append(z)
+        de_list_fused = de_list_fused[::-1]
+
+        en = [self.fuse_feature([en_list[idx] for idx in idxs]) for idxs in self.fuse_layer_encoder]
+        de_fused = [self.fuse_feature([de_list_fused[idx] for idx in idxs]) for idxs in self.fuse_layer_decoder]
+        en = [e.permute(0, 2, 1).reshape([x.shape[0], -1, side, side]).contiguous() for e in en]
+        de_fused = [d.permute(0, 2, 1).reshape([x.shape[0], -1, side, side]).contiguous() for d in de_fused]
+
+        return en, de_per_expert, de_fused, router_info
 
     def fuse_feature(self, feat_list):
         return torch.stack(feat_list, dim=1).mean(dim=1)
